@@ -38,8 +38,9 @@ st.markdown("""
             margin-bottom: 12px; display: flex; align-items: center; gap: 10px; 
         }
         .stTextArea textarea { font-size: 1rem; border-radius: 10px; background-color: #f9f9f9; }
-        [data-testid="stCameraInput"] { border: 2px solid white; border-radius: 12px; }
-        .preview-box { border: 2px solid #ffffff33; border-radius: 10px; padding: 5px; background: #00000022; }
+        /* Keep camera widget style clean */
+        [data-testid="stCameraInput"] { border: 2px solid white; border-radius: 12px; margin-bottom: 10px; }
+        .preview-label { color: white; font-weight: bold; font-size: 0.85rem; margin-top: 10px; margin-bottom: 5px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -56,13 +57,13 @@ def transcribe_dental_audio(audio_data):
             speech_model=aai.SpeechModel.best,
             punctuate=True,
             format_text=True,
-            word_boost=["periodontitis", "mesio-occlusal", "buccal", "distal", "caries", "cavity"],
+            word_boost=["periodontitis", "mesio-occlusal", "buccal", "distal", "caries"],
             boost_param="high"
         )
         transcript = transcriber.transcribe(tmp_path, config=config)
-        return transcript.text if transcript.status != aai.TranscriptStatus.error else "Transcription Error."
+        return transcript.text if transcript.status != aai.TranscriptStatus.error else "Error in transcription."
     except:
-        return "Audio processing failed."
+        return "Transcription failed."
     finally:
         if 'tmp_path' in locals() and os.path.exists(tmp_path): os.remove(tmp_path)
 
@@ -90,11 +91,11 @@ with col_left:
     with st.container(border=True):
         st.markdown('<div class="section-header">👤 Patient Details</div>', unsafe_allow_html=True)
         i1, i2 = st.columns(2)
-        with i1: st.session_state.patient_name = st.text_input("Name", value=st.session_state.patient_name)
+        with i1: st.session_state.patient_name = st.text_input("Full Name", value=st.session_state.patient_name)
         with i2: st.session_state.tooth_number = st.text_input("Tooth #", value=st.session_state.tooth_number)
 
-    st.markdown('<div class="section-header">🎙️ Recorder</div>', unsafe_allow_html=True)
-    audio_data = st.audio_input("Speak", key=f"v_{st.session_state.audio_key}", label_visibility="collapsed")
+    st.markdown('<div class="section-header">🎙️ Clinical Recorder</div>', unsafe_allow_html=True)
+    audio_data = st.audio_input("Record Notes", key=f"audio_{st.session_state.audio_key}", label_visibility="collapsed")
 
     if audio_data:
         h = hashlib.md5(audio_data.getvalue()).hexdigest()
@@ -105,11 +106,11 @@ with col_left:
                 st.session_state.processed_audio_hashes.add(h)
                 st.rerun()
 
-    st.session_state.transcribed_text = st.text_area("Clinical Notes", value=st.session_state.transcribed_text, height=150)
+    st.session_state.transcribed_text = st.text_area("Observations", value=st.session_state.transcribed_text, height=180)
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🔄 Clear Notes", use_container_width=True):
+        if st.button("🔄 Clear All Notes", use_container_width=True):
             st.session_state.transcribed_text = ""
             st.session_state.processed_audio_hashes = set()
             st.session_state.audio_key += 1
@@ -117,36 +118,38 @@ with col_left:
     with c2:
         if st.button("💾 SAVE RECORD", type="primary", use_container_width=True):
             if save_record_permanently():
-                st.success("Saved!")
+                st.success("Record Saved!")
                 st.balloons()
-            else: st.error("Missing Info")
+            else: st.error("Incomplete Info")
 
 # ================= RIGHT COLUMN: PHOTO =================
 with col_right:
-    st.markdown('<div class="section-header">📸 Intraoral Camera</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">📸 Intraoral Photo</div>', unsafe_allow_html=True)
     
-    # Use a key so we can force-clear the snapshot
-    cam_img = st.camera_input("Viewfinder", label_visibility="collapsed", key=f"c_{st.session_state.camera_key}")
+    # 1. CAMERA WIDGET (Always at the top)
+    # It naturally freezes when a photo is taken
+    cam_img = st.camera_input("Capture", label_visibility="collapsed", key=f"cam_{st.session_state.camera_key}")
     
     if cam_img:
         if not os.path.exists("temp_data"): os.makedirs("temp_data")
-        t_path = os.path.join("temp_data", "current.jpg")
-        Image.open(cam_img).save(t_path)
-        st.session_state.image_path = t_path
+        temp_path = os.path.join("temp_data", "latest_capture.jpg")
+        Image.open(cam_img).save(temp_path)
+        st.session_state.image_path = temp_path
 
-    # PREVIEW AREA
+    # 2. PREVIEW AREA (Appears below when a photo is taken)
     if st.session_state.image_path:
-        st.markdown("---")
-        p1, p2 = st.columns([0.4, 0.6]) # Preview takes 40% of the width
+        st.markdown('<div class="preview-label">LATEST CAPTURE:</div>', unsafe_allow_html=True)
+        
+        # Use columns to make the preview smaller (thumbnail size)
+        p1, p2 = st.columns([0.4, 0.6]) 
         with p1:
-            st.markdown('<div class="preview-box">', unsafe_allow_html=True)
-            st.image(st.session_state.image_path, caption="Snapshot", use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.image(st.session_state.image_path, use_container_width=True)
         with p2:
-            st.write("Confirm capture or discard to retake.")
+            st.caption("Confirm patient info and notes before saving.")
             if st.button("🗑️ Discard & Retake", use_container_width=True):
                 st.session_state.image_path = None
-                st.session_state.camera_key += 1 # Forces camera to clear the snapshot
+                # This resets the camera widget back to LIVE mode
+                st.session_state.camera_key += 1 
                 st.rerun()
     else:
-        st.info("Take a photo to preview.")
+        st.info("Live feed active. Click 'Take Photo' to capture a snapshot.")
