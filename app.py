@@ -43,6 +43,7 @@ st.markdown("""
 # --- Logic: AssemblyAI Transcription with Fallback ---
 def transcribe_dental_audio(audio_data):
     aai.settings.api_key = st.secrets["ASSEMBLY_AI_KEY"] # GOOD! SECURE
+
     
     # Save audio bytes to a temporary file
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
@@ -50,7 +51,7 @@ def transcribe_dental_audio(audio_data):
         tmp_path = tmp_file.name
 
     transcriber = aai.Transcriber()
-    dental_keywords = ["periodontitis", "mesio-occlusal", "distal", "buccal", "caries", "molar", "incisor", "composite", "amalgam"]
+    dental_keywords = ["periodontitis", "mesio-occlusal", "distal", "buccal", "caries", "molar", "incisor", "composite", "amalgam","cavity"]
 
     try:
         # 1. Attempt "Best" Model (High Quality)
