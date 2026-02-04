@@ -22,7 +22,6 @@ if 'image_path' not in st.session_state: st.session_state.image_path = None
 if 'transcribed_text' not in st.session_state: st.session_state.transcribed_text = ""
 if 'processed_audio_hashes' not in st.session_state: st.session_state.processed_audio_hashes = set()
 if 'audio_key' not in st.session_state: st.session_state.audio_key = 0
-if 'camera_key' not in st.session_state: st.session_state.camera_key = 0
 
 # --- CSS Styling ---
 st.markdown("""
@@ -90,27 +89,23 @@ def audio_section():
 def camera_section():
     st.markdown('<div class="section-header">📸 Intraoral Photo</div>', unsafe_allow_html=True)
     
-    # 1. Camera Input
-    cam_img = st.camera_input("Capture", label_visibility="collapsed", key=f"cam_{st.session_state.camera_key}")
+    # Static Camera Input (no key reset = no flicker)
+    cam_img = st.camera_input("Capture", label_visibility="collapsed")
     
-    # 2. Clear Button (Appears only when a photo is captured)
-    if cam_img or st.session_state.image_path:
-        if st.button("🗑️ CLEAR PHOTO & RETAKE", use_container_width=True):
-            st.session_state.image_path = None
-            st.session_state.camera_key += 1 # Resets the camera widget to live mode
-            st.rerun()
-
-    # Logic to update the path
     if cam_img:
+        # Save to temp location for preview and final saving
         if not os.path.exists("temp_data"): os.makedirs("temp_data")
         temp_path = os.path.join("temp_data", "latest_capture.jpg")
         Image.open(cam_img).save(temp_path)
         st.session_state.image_path = temp_path
-
-    # 3. Preview Area (No discard button here, just the view)
-    if st.session_state.image_path:
+        
+        # Display Preview
         st.markdown('<div class="preview-label">LATEST CAPTURE:</div>', unsafe_allow_html=True)
         st.image(st.session_state.image_path, width=400)
+    else:
+        # If user clicks the built-in "Clear" button, cam_img becomes None
+        st.session_state.image_path = None
+        st.info("Live feed active. Capture a photo to preview.")
 
 # --- Main Page Layout ---
 col_left, col_right = st.columns([0.45, 0.55], gap="medium")
