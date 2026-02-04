@@ -4,7 +4,6 @@ from PIL import Image
 from datetime import datetime
 import os
 import shutil
-import io
 import hashlib
 import tempfile
 
@@ -38,7 +37,6 @@ st.markdown("""
             margin-bottom: 12px; display: flex; align-items: center; gap: 10px; 
         }
         .stTextArea textarea { font-size: 1rem; border-radius: 10px; background-color: #f9f9f9; }
-        /* Keep camera widget style clean */
         [data-testid="stCameraInput"] { border: 2px solid white; border-radius: 12px; margin-bottom: 10px; }
         .preview-label { color: white; font-weight: bold; font-size: 0.85rem; margin-top: 10px; margin-bottom: 5px; }
     </style>
@@ -81,6 +79,50 @@ def save_record_permanently():
         f.write(f"Patient: {st.session_state.patient_name}\nTooth: {st.session_state.tooth_number}\nNotes: {st.session_state.transcribed_text}")
     return save_dir
 
+# --- Fragments for UI Stability ---
+
+@st.fragment
+def audio_section():
+    st.markdown('<div class="section-header">🎙️ Clinical Recorder</div>', unsafe_allow_html=True)
+    audio_data = st.audio_input("Record Notes", key=f"audio_{st.session_state.audio_key}", label_visibility="collapsed")
+
+    if audio_data:
+        h = hashlib.md5(audio_data.getvalue()).hexdigest()
+        if h not in st.session_state.processed_audio_hashes:
+            with st.spinner("Processing..."):
+                txt = transcribe_dental_audio(audio_data)
+                st.session_state.transcribed_text += f" {txt}" if st.session_state.transcribed_text else txt
+                st.session_state.processed_audio_hashes.add(h)
+                st.rerun() # This rerun only refreshes the fragment
+
+    st.session_state.transcribed_text = st.text_area("Observations", value=st.session_state.transcribed_text, height=180)
+
+@st.fragment
+def camera_section():
+    st.markdown('<div class="section-header">📸 Intraoral Photo</div>', unsafe_allow_html=True)
+    
+    # Use the key to reset the widget when Discard is pressed
+    cam_img = st.camera_input("Capture", label_visibility="collapsed", key=f"cam_{st.session_state.camera_key}")
+    
+    if cam_img:
+        if not os.path.exists("temp_data"): os.makedirs("temp_data")
+        temp_path = os.path.join("temp_data", "latest_capture.jpg")
+        Image.open(cam_img).save(temp_path)
+        st.session_state.image_path = temp_path
+
+        st.markdown('<div class="preview-label">LATEST CAPTURE:</div>', unsafe_allow_html=True)
+        p1, p2 = st.columns([0.4, 0.6]) 
+        with p1:
+            st.image(st.session_state.image_path, use_container_width=True)
+        with p2:
+            st.caption("Confirm patient info and notes before saving.")
+            if st.button("🗑️ Discard & Retake", use_container_width=True):
+                st.session_state.image_path = None
+                st.session_state.camera_key += 1 
+                st.rerun() # Reruns ONLY this fragment, making it much smoother
+    else:
+        st.info("Live feed active. Click 'Take Photo' to capture a snapshot.")
+
 # --- Main Layout ---
 col_left, col_right = st.columns([0.45, 0.55], gap="medium")
 
@@ -94,19 +136,8 @@ with col_left:
         with i1: st.session_state.patient_name = st.text_input("Full Name", value=st.session_state.patient_name)
         with i2: st.session_state.tooth_number = st.text_input("Tooth #", value=st.session_state.tooth_number)
 
-    st.markdown('<div class="section-header">🎙️ Clinical Recorder</div>', unsafe_allow_html=True)
-    audio_data = st.audio_input("Record Notes", key=f"audio_{st.session_state.audio_key}", label_visibility="collapsed")
-
-    if audio_data:
-        h = hashlib.md5(audio_data.getvalue()).hexdigest()
-        if h not in st.session_state.processed_audio_hashes:
-            with st.spinner("Processing..."):
-                txt = transcribe_dental_audio(audio_data)
-                st.session_state.transcribed_text += f" {txt}" if st.session_state.transcribed_text else txt
-                st.session_state.processed_audio_hashes.add(h)
-                st.rerun()
-
-    st.session_state.transcribed_text = st.text_area("Observations", value=st.session_state.transcribed_text, height=180)
+    # Isolated Audio logic
+    audio_section()
 
     c1, c2 = st.columns(2)
     with c1:
@@ -124,32 +155,5 @@ with col_left:
 
 # ================= RIGHT COLUMN: PHOTO =================
 with col_right:
-    st.markdown('<div class="section-header">📸 Intraoral Photo</div>', unsafe_allow_html=True)
-    
-    # 1. CAMERA WIDGET (Always at the top)
-    # It naturally freezes when a photo is taken
-    cam_img = st.camera_input("Capture", label_visibility="collapsed", key=f"cam_{st.session_state.camera_key}")
-    
-    if cam_img:
-        if not os.path.exists("temp_data"): os.makedirs("temp_data")
-        temp_path = os.path.join("temp_data", "latest_capture.jpg")
-        Image.open(cam_img).save(temp_path)
-        st.session_state.image_path = temp_path
-
-    # 2. PREVIEW AREA (Appears below when a photo is taken)
-    if st.session_state.image_path:
-        st.markdown('<div class="preview-label">LATEST CAPTURE:</div>', unsafe_allow_html=True)
-        
-        # Use columns to make the preview smaller (thumbnail size)
-        p1, p2 = st.columns([0.4, 0.6]) 
-        with p1:
-            st.image(st.session_state.image_path, use_container_width=True)
-        with p2:
-            st.caption("Confirm patient info and notes before saving.")
-            if st.button("🗑️ Discard & Retake", use_container_width=True):
-                st.session_state.image_path = None
-                # This resets the camera widget back to LIVE mode
-                st.session_state.camera_key += 1 
-                st.rerun()
-    else:
-        st.info("Live feed active. Click 'Take Photo' to capture a snapshot.")
+    # Isolated Camera logic
+    camera_section()
