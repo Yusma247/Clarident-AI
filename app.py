@@ -4,7 +4,7 @@ from datetime import datetime
 import os
 import speech_recognition as sr
 import io
-from streamlit_audiorecorder import audiorecorder
+from audiorecorder import audiorecorder
 
 # --- Page Configuration ---
 st.set_page_config(
