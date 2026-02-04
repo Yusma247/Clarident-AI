@@ -48,13 +48,24 @@ def transcribe_dental_audio(audio_data):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
             tmp_file.write(audio_data.getvalue())
             tmp_path = tmp_file.name
+        
         transcriber = aai.Transcriber()
-        config = aai.TranscriptionConfig(speech_model=aai.SpeechModel.best, punctuate=True, format_text=True)
+        config = aai.TranscriptionConfig(
+            speech_model=aai.SpeechModel.best,
+            punctuate=True,
+            format_text=True
+        )
         transcript = transcriber.transcribe(tmp_path, config=config)
-        return transcript.text
-    except: return "Transcription failed."
+        
+        # Ensure we return a string, never None
+        if transcript.status == aai.TranscriptStatus.error:
+            return ""
+        return transcript.text if transcript.text else ""
+    except Exception as e:
+        return ""
     finally:
-        if 'tmp_path' in locals() and os.path.exists(tmp_path): os.remove(tmp_path)
+        if 'tmp_path' in locals() and os.path.exists(tmp_path): 
+            os.remove(tmp_path)
 
 # --- Logic: Saving ---
 def save_record_permanently():
@@ -75,15 +86,29 @@ def save_record_permanently():
 def audio_section():
     st.markdown('<div class="section-header">🎙️ Clinical Recorder</div>', unsafe_allow_html=True)
     audio_data = st.audio_input("Record", key=f"audio_{st.session_state.audio_key}", label_visibility="collapsed")
+    
     if audio_data:
         h = hashlib.md5(audio_data.getvalue()).hexdigest()
         if h not in st.session_state.processed_audio_hashes:
             with st.spinner("Transcribing..."):
                 txt = transcribe_dental_audio(audio_data)
-                st.session_state.transcribed_text += f" {txt}" if st.session_state.transcribed_text else txt
+                
+                # FIX: Only append if txt is a valid, non-empty string
+                if txt and isinstance(txt, str):
+                    if st.session_state.transcribed_text:
+                        st.session_state.transcribed_text += f" {txt}"
+                    else:
+                        st.session_state.transcribed_text = txt
+                
                 st.session_state.processed_audio_hashes.add(h)
                 st.rerun()
-    st.session_state.transcribed_text = st.text_area("Observations", value=st.session_state.transcribed_text, height=180)
+    
+    # Text area for manual edits
+    st.session_state.transcribed_text = st.text_area(
+        "Observations", 
+        value=st.session_state.transcribed_text, 
+        height=180
+    )
 
 @st.fragment
 def camera_section():
