@@ -69,6 +69,7 @@ def transcribe_dental_audio(audio_data):
 
 # --- Logic: Saving ---
 def save_record_permanently():
+    # Double check validation here for safety
     if not st.session_state.patient_name or not st.session_state.image_path:
         return False
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -155,10 +156,18 @@ with col_left:
             st.rerun()
     with c2:
         if st.button("💾 SAVE RECORD", type="primary", use_container_width=True):
-            if save_record_permanently():
-                st.success("Record Saved!")
-                st.balloons()
-            else: st.error("Incomplete Info")
+            # 1. Identify what is missing
+            missing_fields = []
+            if not st.session_state.patient_name:
+                missing_fields.append("Patient Name")
+            if not st.session_state.image_path:
+                missing_fields.append("Intraoral Photo")
+            
+            # 2. Logic to handle missing fields or successful save
+            if missing_fields:
+                st.error(f"Missing: {', '.join(missing_fields)}")
+            elif save_record_permanently():
+                st.toast("Record Saved Successfully!", icon="✅")
 
 with col_right:
     camera_section()
