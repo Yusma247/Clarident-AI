@@ -47,7 +47,22 @@ st.markdown("""
 # --- Google Drive Logic ---
 def get_gdrive_service():
     """Authenticates with Google Drive using Streamlit Secrets."""
-    creds_info = json.loads(st.secrets["GDRIVE_SERVICE_ACCOUNT"])
+    # 1. Get the secret
+    creds_info = st.secrets["GDRIVE_SERVICE_ACCOUNT"]
+    
+    # 2. If it's a string (from the ''' method), parse it. 
+    # If it's already a dict/AttrDict, just use it.
+    if isinstance(creds_info, str):
+        creds_info = json.loads(creds_info)
+    else:
+        # Convert Streamlit AttrDict to a standard Python dict
+        creds_info = dict(creds_info)
+    
+    # 3. CRITICAL: Fix the private key formatting 
+    # (Sometimes \n characters get double-escaped in TOML)
+    if "private_key" in creds_info:
+        creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
+
     creds = service_account.Credentials.from_service_account_info(
         creds_info, scopes=['https://www.googleapis.com/auth/drive']
     )
