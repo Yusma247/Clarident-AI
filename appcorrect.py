@@ -3,12 +3,9 @@ import assemblyai as aai
 from PIL import Image
 from datetime import datetime
 import os
+import shutil
 import hashlib
 import tempfile
-import json
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -44,44 +41,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Google Drive Logic ---
-def get_gdrive_service():
-    """Authenticates with Google Drive using Streamlit Secrets."""
-    creds_info = json.loads(st.secrets["GDRIVE_SERVICE_ACCOUNT"])
-    creds = service_account.Credentials.from_service_account_info(
-        creds_info, scopes=['https://www.googleapis.com/auth/drive']
-    )
-    return build('drive', 'v3', credentials=creds)
-
-def find_or_create_folder(folder_name, parent_id=None):
-    """Checks if folder exists, if not creates it. Returns Folder ID."""
-    service = get_gdrive_service()
-    query = f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-    if parent_id:
-        query += f" and '{parent_id}' in parents"
-    
-    results = service.files().list(q=query, fields="files(id, name)").execute()
-    items = results.get('files', [])
-    
-    if items:
-        return items[0]['id']
-    else:
-        file_metadata = {
-            'name': folder_name,
-            'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [parent_id] if parent_id else []
-        }
-        folder = service.files().create(body=file_metadata, fields='id').execute()
-        return folder.get('id')
-
-def upload_to_drive(file_path, file_name, folder_id, mime_type):
-    """Uploads a file to a specific Google Drive folder."""
-    service = get_gdrive_service()
-    file_metadata = {'name': file_name, 'parents': [folder_id]}
-    media = MediaFileUpload(file_path, mimetype=mime_type, resumable=True)
-    service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-
-# --- AssemblyAI Logic ---
+# --- Logic: AssemblyAI ---
 def transcribe_dental_audio(audio_data):
     try:
         aai.settings.api_key = st.secrets["ASSEMBLY_AI_KEY"]
@@ -90,16 +50,39 @@ def transcribe_dental_audio(audio_data):
             tmp_path = tmp_file.name
         
         transcriber = aai.Transcriber()
-        config = aai.TranscriptionConfig(speech_model=aai.SpeechModel.best)
+        config = aai.TranscriptionConfig(
+            speech_model=aai.SpeechModel.best,
+            punctuate=True,
+            format_text=True
+        )
         transcript = transcriber.transcribe(tmp_path, config=config)
+        
+        # Ensure we return a string, never None
+        if transcript.status == aai.TranscriptStatus.error:
+            return ""
         return transcript.text if transcript.text else ""
-    except Exception:
+    except Exception as e:
         return ""
     finally:
         if 'tmp_path' in locals() and os.path.exists(tmp_path): 
             os.remove(tmp_path)
 
-# --- UI Fragments ---
+# --- Logic: Saving ---
+def save_record_permanently():
+    # Double check validation here for safety
+    if not st.session_state.patient_name or not st.session_state.image_path:
+        return False
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    clean_name = "".join(x for x in st.session_state.patient_name if x.isalnum() or x in " _-")
+    save_dir = os.path.join("saved_records", f"{clean_name}_{timestamp}")
+    os.makedirs(save_dir, exist_ok=True)
+    shutil.copy(st.session_state.image_path, os.path.join(save_dir, "tooth_image.jpg"))
+    with open(os.path.join(save_dir, "Notes.txt"), "w") as f:
+        f.write(f"Patient: {st.session_state.patient_name}\nTooth: {st.session_state.tooth_number}\nNotes: {st.session_state.transcribed_text}")
+    return True
+
+# --- Isolated UI Fragments ---
+
 @st.fragment
 def audio_section():
     st.markdown('<div class="section-header">🎙️ Clinical Recorder</div>', unsafe_allow_html=True)
@@ -110,71 +93,47 @@ def audio_section():
         if h not in st.session_state.processed_audio_hashes:
             with st.spinner("Transcribing..."):
                 txt = transcribe_dental_audio(audio_data)
-                if txt:
-                    st.session_state.transcribed_text += f" {txt}"
+                
+                # FIX: Only append if txt is a valid, non-empty string
+                if txt and isinstance(txt, str):
+                    if st.session_state.transcribed_text:
+                        st.session_state.transcribed_text += f" {txt}"
+                    else:
+                        st.session_state.transcribed_text = txt
+                
                 st.session_state.processed_audio_hashes.add(h)
                 st.rerun()
     
+    # Text area for manual edits
     st.session_state.transcribed_text = st.text_area(
-        "Observations", value=st.session_state.transcribed_text, height=180
+        "Observations", 
+        value=st.session_state.transcribed_text, 
+        height=180
     )
 
 @st.fragment
 def camera_section():
     st.markdown('<div class="section-header">📸 Intraoral Photo</div>', unsafe_allow_html=True)
+    
+    # Static Camera Input (no key reset = no flicker)
     cam_img = st.camera_input("Capture", label_visibility="collapsed")
     
     if cam_img:
-        # We use tempfile to ensure compatibility with Streamlit Cloud
-        temp_dir = tempfile.gettempdir()
-        temp_path = os.path.join(temp_dir, "latest_capture.jpg")
+        # Save to temp location for preview and final saving
+        if not os.path.exists("temp_data"): os.makedirs("temp_data")
+        temp_path = os.path.join("temp_data", "latest_capture.jpg")
         Image.open(cam_img).save(temp_path)
         st.session_state.image_path = temp_path
         
+        # Display Preview
         st.markdown('<div class="preview-label">LATEST CAPTURE:</div>', unsafe_allow_html=True)
         st.image(st.session_state.image_path, width=400)
     else:
+        # If user clicks the built-in "Clear" button, cam_img becomes None
         st.session_state.image_path = None
+        st.info("Live feed active. Capture a photo to preview.")
 
-# --- Main Logic: Save to Drive ---
-def save_everything():
-    if not st.session_state.patient_name or not st.session_state.image_path:
-        st.error("Please provide Patient Name and Photo.")
-        return
-
-    try:
-        with st.spinner("Uploading to Google Drive..."):
-            # 1. Root Folder ID from your secrets
-            root_id = st.secrets["GDRIVE_ROOT_FOLDER_ID"]
-            
-            # 2. Folder for the Patient (Shared across multiple teeth)
-            patient_folder_id = find_or_create_folder(st.session_state.patient_name, root_id)
-            
-            # 3. Folder for this specific visit/tooth
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-            tooth_folder_name = f"Tooth_{st.session_state.tooth_number}_{timestamp}"
-            visit_folder_id = find_or_create_folder(tooth_folder_name, patient_folder_id)
-            
-            # 4. Upload Image
-            upload_to_drive(st.session_state.image_path, "photo.jpg", visit_folder_id, "image/jpeg")
-            
-            # 5. Upload Notes as Text File
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as tf:
-                tf.write(f"Patient: {st.session_state.patient_name}\n")
-                tf.write(f"Tooth: {st.session_state.tooth_number}\n")
-                tf.write(f"Date: {datetime.now().strftime('%Y-%m-%d')}\n\n")
-                tf.write(f"Notes:\n{st.session_state.transcribed_text}")
-                notes_path = tf.name
-            
-            upload_to_drive(notes_path, "Clinical_Notes.txt", visit_folder_id, "text/plain")
-            os.remove(notes_path)
-            
-            st.success(f"Saved to Drive: {st.session_state.patient_name} > {tooth_folder_name}")
-            st.balloons()
-    except Exception as e:
-        st.error(f"Sync Error: {e}")
-
-# --- Layout ---
+# --- Main Page Layout ---
 col_left, col_right = st.columns([0.45, 0.55], gap="medium")
 
 with col_left:
@@ -190,14 +149,25 @@ with col_left:
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🔄 Clear All", use_container_width=True):
+        if st.button("🔄 Clear All Notes", use_container_width=True):
             st.session_state.transcribed_text = ""
             st.session_state.processed_audio_hashes = set()
             st.session_state.audio_key += 1
             st.rerun()
     with c2:
-        if st.button("💾 SAVE TO DRIVE", type="primary", use_container_width=True):
-            save_everything()
+        if st.button("💾 SAVE RECORD", type="primary", use_container_width=True):
+            # 1. Identify what is missing
+            missing_fields = []
+            if not st.session_state.patient_name:
+                missing_fields.append("Patient Name")
+            if not st.session_state.image_path:
+                missing_fields.append("Intraoral Photo")
+            
+            # 2. Logic to handle missing fields or successful save
+            if missing_fields:
+                st.error(f"Missing: {', '.join(missing_fields)}")
+            elif save_record_permanently():
+                st.toast("Record Saved Successfully!", icon="✅")
 
 with col_right:
     camera_section()

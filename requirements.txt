@@ -3,3 +3,6 @@ Pillow
 SpeechRecognition
 pydub
 assemblyai
+google-api-python-client
+google-auth
+
