@@ -1,0 +1,29 @@
+name: Morning Wake-up Call
+
+on:
+  schedule:
+    # 02:00 UTC is 07:30 AM Indian Standard Time (IST)
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Allows you to manually wake it up if needed
+
+permissions:
+  contents: write
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Update timestamp
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # This creates/updates the file to trigger a Streamlit reboot
+          echo "Last wake up: $(date)" > heartbeat.txt
+          
+          git add heartbeat.txt
+          git commit -m "☀️ Morning wake-up call for ClariDent" || exit 0
+          git push
